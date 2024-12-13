@@ -23,7 +23,6 @@ import {
     Stage
 } from "aws-cdk-lib/aws-apigateway";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {Repository} from "aws-cdk-lib/aws-ecr";
 import {Schedule} from "aws-cdk-lib/aws-events";
 
 export class ChinaCloudFrontSslPluginStack extends cdk.Stack {
@@ -31,13 +30,6 @@ export class ChinaCloudFrontSslPluginStack extends cdk.Stack {
         super(scope, id, props);
 
         this.templateOptions.description = "(SO8156-cn) - China CloudFront SSL Plugin";
-
-        // Modify ECR AccountId before export to CloudFormation
-        const ecrAccountId = "YOUR_AWS_ACCOUNT_ID"
-        const certBotImgName = "cloudfront_ssl_plugin/certbot"
-        const apiExplorerImgName = "cloudfront_ssl_plugin/api_explorer_iam_cert"
-        const listCertImgName = "cloudfront_ssl_plugin/list_iam_cert"
-        const deleteCertImgName = "cloudfront_ssl_plugin/delete_iam_cert"
 
         const domainName = new CfnParameter(this, "domainName", {
             type: "String",
@@ -96,15 +88,18 @@ export class ChinaCloudFrontSslPluginStack extends cdk.Stack {
             removalPolicy: RemovalPolicy.DESTROY
         });
 
-
-        const certbot_repo = Repository.fromRepositoryAttributes(this, "CertBotRepository", {
-            repositoryArn: "arn:aws:ecr:" + Aws.REGION + ":" + ecrAccountId + ":repository/" + certBotImgName,
-            repositoryName: certBotImgName,
-        })
-        const certbot_lambda_fn = new lambda.DockerImageFunction(this, 'CertBotFunction', {
-            code: lambda.DockerImageCode.fromEcr(certbot_repo, {
-                tagOrDigest: 'latest',
+        const certbot_lambda_fn = new lambda.Function(this, 'CertBotFunction', {
+            code: lambda.Code.fromAsset('../lambda/CertBot/certbot', {
+                bundling: {
+                    image: lambda.Runtime.PYTHON_3_10.bundlingImage, // should be 3.12
+                    command: [
+                        'bash', '-c',
+                        'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output'
+                    ],
+                },
             }),
+            runtime: lambda.Runtime.PYTHON_3_10, // should be 3.12
+            handler: 'app.handler',
             description: "Core Function for issuing certificates",
             environment: {
                 CERTBOT_BUCKET: cert_bucket.bucketName,
@@ -225,14 +220,19 @@ export class ChinaCloudFrontSslPluginStack extends cdk.Stack {
 
         const invokeUrl = `https://${mgmt_rest_api.restApiId}.execute-api.${Aws.REGION}.amazonaws.com.cn/prod`
 
-        const apiDocRepo = Repository.fromRepositoryAttributes(this, "ApiDocRepository", {
-            repositoryArn: "arn:aws:ecr:" + Aws.REGION + ":" + ecrAccountId + ":repository/" + apiExplorerImgName,
-            repositoryName: apiExplorerImgName,
-        })
-        const apiDocFunction = new lambda.DockerImageFunction(this, 'APIExplorerFunction', {
-            code: lambda.DockerImageCode.fromEcr(apiDocRepo, {
-                tagOrDigest: 'latest',
+        const apiDocFunction = new lambda.Function(this, 'APIExplorerFunction', {
+            code: lambda.Code.fromAsset('../lambda/api-explorer', {
+                bundling: {
+                    image: lambda.Runtime.NODEJS_18_X.bundlingImage,
+                    command: [
+                        'bash', '-c',
+                        'cp -au . /asset-output && cd /asset-output && npm install'
+                    ],
+                    user: 'root'
+                }
             }),
+            handler: 'app.handler',
+            runtime: lambda.Runtime.NODEJS_18_X,
             description: "API Explorer for management certificates",
             environment: {
                 SWAGGER_SPEC_URL: invokeUrl.toString(),
@@ -240,28 +240,34 @@ export class ChinaCloudFrontSslPluginStack extends cdk.Stack {
             timeout: Duration.seconds(20),
         });
 
-
-        const deleteCertRepo = Repository.fromRepositoryAttributes(this, "DeleteCertRepository", {
-            repositoryArn: "arn:aws:ecr:" + Aws.REGION + ":" + ecrAccountId + ":repository/" + deleteCertImgName,
-            repositoryName: deleteCertImgName,
-        })
-        const deleteCertFunction = new lambda.DockerImageFunction(this, 'DeleteCertFunction', {
-            code: lambda.DockerImageCode.fromEcr(deleteCertRepo, {
-                tagOrDigest: 'latest',
+        const deleteCertFunction = new lambda.Function(this, 'DeleteCertFunction', {
+            code: lambda.Code.fromAsset('../lambda/ManageCert/DeleteCert', {
+                // bundling: {
+                //     image: lambda.Runtime.PYTHON_3_9.bundlingImage,
+                //     command: [
+                //         'bash', '-c',
+                //         'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output'
+                //     ],
+                // }
             }),
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'app.handler',
             description: "API for delete IAM certificates",
             timeout: Duration.seconds(20),
         });
 
-
-        const listCertRepo = Repository.fromRepositoryAttributes(this, "ListCertRepository", {
-            repositoryArn: "arn:aws:ecr:" + Aws.REGION + ":" + ecrAccountId + ":repository/" + listCertImgName,
-            repositoryName: listCertImgName,
-        })
-        const listCertFunction = new lambda.DockerImageFunction(this, 'ListCertFunction', {
-            code: lambda.DockerImageCode.fromEcr(listCertRepo, {
-                tagOrDigest: 'latest',
+        const listCertFunction = new lambda.Function(this, 'ListCertFunction', {
+            code: lambda.Code.fromAsset('../lambda/ManageCert/ListCert', {
+                // bundling: {
+                //     image: lambda.Runtime.PYTHON_3_9.bundlingImage,
+                //     command: [
+                //         'bash', '-c',
+                //         'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output'
+                //     ],
+                // }
             }),
+            runtime: lambda.Runtime.PYTHON_3_9,
+            handler: 'app.handler',
             description: "API for list IAM certificates",
             timeout: Duration.seconds(20),
         });
